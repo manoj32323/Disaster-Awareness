@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live 3D Flood Map | Disaster Awareness</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/globe.gl"></script>
+    <style>
+        body { margin: 0; padding: 0; font-family: 'Inter', sans-serif; background-color: #000; overflow: hidden; color: white; }
+        
+        #globeViz { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; }
+        
+        /* Glassmorphism sidebar */
+        #sidebar {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            width: 350px;
+            max-height: calc(100vh - 40px);
+            background: rgba(15, 15, 20, 0.7);
+            backdrop-filter: blur(15px);
+            -webkit-backdrop-filter: blur(15px);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 12px;
+            padding: 20px;
+            overflow-y: auto;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            z-index: 10;
+        }
+
+        /* Scrollbar styles for sidebar */
+        #sidebar::-webkit-scrollbar { width: 6px; }
+        #sidebar::-webkit-scrollbar-track { background: rgba(0,0,0,0.1); }
+        #sidebar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 3px; }
+
+        h2 { margin-top:0; font-size: 1.5rem; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 10px; margin-bottom: 15px; color: #fff;}
+        
+        .alert-card {
+            background: rgba(255,255,255,0.05);
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 15px;
+            border-left: 4px solid #4CAF50;
+            transition: all 0.3s;
+            cursor: pointer;
+        }
+        
+        .alert-card:hover { background: rgba(255,255,255,0.1); transform: translateX(-5px); }
+        .alert-card.severity-Orange { border-left-color: #FF9800; }
+        .alert-card.severity-Red { border-left-color: #F44336; }
+
+        .alert-title { font-weight: 600; font-size: 1rem; margin-bottom: 5px; }
+        .alert-time { font-size: 0.8rem; color: #aaa; margin-bottom: 8px; }
+        .alert-desc { font-size: 0.85rem; line-height: 1.4; color: #ddd; }
+        
+        #back-btn {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(255,255,255,0.1);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255,255,255,0.2);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 30px;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 0.9rem;
+            z-index: 10;
+            transition: 0.3s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        #back-btn:hover { background: rgba(255,255,255,0.2); }
+        
+        .loader {
+            text-align: center;
+            padding: 30px;
+            color: #aaa;
+            font-style: italic;
+        }
+    </style>
+</head>
+<body>
+
+    <a href="index.html" id="back-btn">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
+        Return to Dashboard
+    </a>
+
+    <div id="globeViz"></div>
+
+    <div id="sidebar">
+        <h2>Live Disaster Feed</h2>
+        <div id="alerts-list">
+            <div class="loader">Scanning global feeds...</div>
+        </div>
+    </div>
+
+    <script>
+        // Init 3D Globe
+        const world = Globe()
+            (document.getElementById('globeViz'))
+            .globeImageUrl('https://unpkg.com/three-globe/example/img/earth-night.jpg')
+            .bumpImageUrl('https://unpkg.com/three-globe/example/img/earth-topology.png')
+            .backgroundImageUrl('https://unpkg.com/three-globe/example/img/night-sky.png')
+            .pointOfView({ lat: 20, lng: 0, altitude: 2 });
+
+        // Fetch API
+        async function fetchAlerts() {
+            try {
+                const response = await fetch('http://localhost:8000/api/alerts');
+                const data = await response.json();
+                
+                if(data.alerts && data.alerts.length > 0) {
+                    // Update Globe
+                    world.pointsData(data.alerts)
+                        .pointLat('lat')
+                        .pointLng('lng')
+                        .pointColor(d => {
+                            if (d.severity === 'Red') return '#F44336';
+                            if (d.severity === 'Orange') return '#FF9800';
+                            return '#4CAF50';
+                        })
+                        .pointAltitude(d => d.weight * 0.05)
+                        .pointRadius(d => d.weight * 0.5)
+                        .pointsMerge(false)
+                        .pointsTransitionDuration(1000)
+                        // Add ripples
+                        .ringsData(data.alerts)
+                        .ringLat('lat')
+                        .ringLng('lng')
+                        .ringColor(d => {
+                            if (d.severity === 'Red') return t => `rgba(244,67,54,${1-t})`;
+                            if (d.severity === 'Orange') return t => `rgba(255,152,0,${1-t})`;
+                            return t => `rgba(76,175,80,${1-t})`;
+                        })
+                        .ringMaxRadius(d => d.weight * 5)
+                        .ringPropagationSpeed(1)
+                        .ringRepeatPeriod(1000);
+
+                    // Update UI
+                    const list = document.getElementById('alerts-list');
+                    list.innerHTML = "";
+                    data.alerts.forEach(a => {
+                        const card = document.createElement('div');
+                        card.className = `alert-card severity-${a.severity}`;
+                        // Focus on click
+                        card.onclick = () => {
+                            world.pointOfView({lat: a.lat, lng: a.lng, altitude: 1.5}, 1500);
+                        };
+                        card.innerHTML = `
+                            <div class="alert-title">${a.title}</div>
+                            <div class="alert-time">${a.date} | [${a.lat.toFixed(2)}, ${a.lng.toFixed(2)}]</div>
+                            <div class="alert-desc">${a.description}</div>
+                        `;
+                        list.appendChild(card);
+                    });
+                } else {
+                    document.getElementById('alerts-list').innerHTML = '<div class="loader">No active alerts found.</div>';
+                }
+            } catch(e) {
+                console.error(e);
+                document.getElementById('alerts-list').innerHTML = '<div class="loader" style="color:#F44336">Failed to connect to backend server.</div>';
+            }
+        }
+
+        // Add auto-rotation
+        world.controls().autoRotate = true;
+        world.controls().autoRotateSpeed = 0.5;
+
+        // Fetch on load
+        fetchAlerts();
+        // Refresh every minute
+        setInterval(fetchAlerts, 60000);
+    </script>
+</body>
+</html>
